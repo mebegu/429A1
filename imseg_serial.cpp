@@ -41,6 +41,7 @@ void imageSegmentation(int *labels, unsigned char *data, int width, int height, 
 	{
 		//LOOP NEST 1
 		// first pass over the image: Find neighbors with better labels.
+		bool change = false;
 		for (int i = height - 1; i >= 0; i--) {
 			for (int j = width - 1; j >= 0; j--) {
 
@@ -68,36 +69,56 @@ void imageSegmentation(int *labels, unsigned char *data, int width, int height, 
 				// Compare with each neighbor:east, west, south, north, ne, nw, se, sw
 
 				//west
-				if (j != 0 && abs((int)data[(i*width + j - 1)*pixelWidth] - (int)data[idx3]) < Threshold)
-				labels[idx] = std::max(labels[idx], labels[i*width + j - 1]);
+				if (j != 0 && abs((int)data[(i*width + j - 1)*pixelWidth] - (int)data[idx3]) < Threshold) {
+					labels[idx] = std::max(labels[idx], labels[i*width + j - 1]);
+					change = true;
+				}
 
 				//east
-				if (j != width-1 && abs((int)data[(i*width + j + 1)*pixelWidth] - (int)data[idx3]) < Threshold)
-				labels[idx] = std::max(labels[idx], labels[i*width + j + 1]);
+				if (j != width-1 && abs((int)data[(i*width + j + 1)*pixelWidth] - (int)data[idx3]) < Threshold) {
+					labels[idx] = std::max(labels[idx], labels[i*width + j + 1]);
+					change = true;
+				}
 
-				//south
-				if(i != height-1 && abs((int)data[((i+1)*width + j)*pixelWidth] - (int)data[idx3]) < Threshold)
-				labels[idx] = std::max(labels[idx], labels[(i+1)*width + j]);
-
-				//north
-				if(i != 0 && abs((int)data[((i-1)*width + j)*pixelWidth] - (int)data[idx3]) < Threshold)
-				labels[idx] = std::max(labels[idx], labels[(i-1)*width + j]);
-
-				//south east
-				if(i != height-1 && j != width-1 && abs((int)data[((i+1)*width + j + 1)*pixelWidth] - (int)data[idx3]) < Threshold)
-				labels[idx] = std::max(labels[idx], labels[(i+1) * width + j + 1]);
-
-				//north east
-				if(i != 0 && j != width-1 && abs((int)data[((i-1)*width + j + 1)*pixelWidth] - (int)data[idx3]) < Threshold)
-				labels[idx] = std::max(labels[idx], labels[(i-1) * width + j + 1]);
-
-				//south west
-				if(i != height-1 && j!= 0 && abs((int)data[((i+1)*width + j - 1)*pixelWidth] - (int)data[idx3]) < Threshold)
-				labels[idx] = std::max(labels[idx], labels[(i+1) * width + j - 1]);
 
 				//north west
-				if(i != 0 && j != 0 && abs((int)data[((i-1)*width + j - 1)*pixelWidth] - (int)data[idx3]) < Threshold)
-				labels[idx] = std::max(labels[idx], labels[(i-1) * width + j - 1]);
+				if(i != 0 && j != 0 && abs((int)data[((i-1)*width + j - 1)*pixelWidth] - (int)data[idx3]) < Threshold) {
+					labels[idx] = std::max(labels[idx], labels[(i-1) * width + j - 1]);
+					change = true;
+				}
+				//north
+				if(i != 0 && abs((int)data[((i-1)*width + j)*pixelWidth] - (int)data[idx3]) < Threshold) {
+					labels[idx] = std::max(labels[idx], labels[(i-1)*width + j]);
+					change = true;
+				}
+
+				//north east
+				if(i != 0 && j != width-1 && abs((int)data[((i-1)*width + j + 1)*pixelWidth] - (int)data[idx3]) < Threshold) {
+					labels[idx] = std::max(labels[idx], labels[(i-1) * width + j + 1]);
+					change = true;
+				}
+
+				//south west
+				if(i != height-1 && j!= 0 && abs((int)data[((i+1)*width + j - 1)*pixelWidth] - (int)data[idx3]) < Threshold) {
+						labels[idx] = std::max(labels[idx], labels[(i+1) * width + j - 1]);
+						change = true;
+				}
+
+				//south
+				if(i != height-1 && abs((int)data[((i+1)*width + j)*pixelWidth] - (int)data[idx3]) < Threshold) {
+					labels[idx] = std::max(labels[idx], labels[(i+1)*width + j]);
+					change = true;
+				}
+
+				//south east
+				if(i != height-1 && j != width-1 && abs((int)data[((i+1)*width + j + 1)*pixelWidth] - (int)data[idx3]) < Threshold) {
+					labels[idx] = std::max(labels[idx], labels[(i+1) * width + j + 1]);
+					change = true;
+				}
+
+
+
+
 
 				// if label assigned to this pixel during this "follow the pointers" step is worse than one of its neighbors,
 				// then that means that we're converging to local maximum instead
@@ -107,7 +128,7 @@ void imageSegmentation(int *labels, unsigned char *data, int width, int height, 
 				}
 			}
 		}
-
+		if (!change) break;
 		//LOOP NEST 2
 		// Second pass on the labels. propagates the updated label of the parent to the children.
 		for (int i = 0; i < height; i++) {
@@ -188,91 +209,92 @@ int main(int argc,char **argv)
 			labels[idx] = idx + 1;
 		}
 	}
+	#if defined(_OPENMP)
 	omp_set_dynamic(0);
+	#endif
 	//Now perform relabeling
 	#pragma omp parallel num_threads(numThreads)
 	{
-		//numThreads = omp_get_num_threads();
 
-	//	printf("%d\n", numThreads);
-	//pixelWidth=1;
 		int localDataSize = (width * pixelWidth * height) / numThreads;
-		//unsigned char *localData = new unsigned char[localDataSize];
-
 		int localLabelSize = (width * height) / numThreads;
-		//int *localLabels = new int[localLabelSize];
+
 		printf("%d %d\n", localLabelSize, localDataSize);
 		#pragma omp for
-			for(int i=0; i<numThreads; i++){
-					for (int j = 0; j < localLabelSize; j++) {
-						int newLabel = ((int)data[(i*localLabelSize+j)*pixelWidth]) == 0 ? 0 : j+1;
-						//if (labels[i*localLabelSize+j] != newLabel) printf("This happened i:%d j:%d\n",i,j );
-						labels[i*localLabelSize+j] = newLabel;
+		for(int i=0; i<numThreads; i++){
+			for (int j = 0; j < localLabelSize; j++) {
+				int newLabel = ((int)data[(i*localLabelSize+j)*pixelWidth]) == 0 ? 0 : j+1;
+
+				labels[i*localLabelSize+j] = newLabel;
+			}
+			imageSegmentation(labels+i*localLabelSize,data+i*localDataSize,width,height/numThreads,pixelWidth,Threshold);
+		}
+	}
+	printf("In the memory of \"here\"\n" );
+	if(numThreads > 1) {
+
+		int localLabelSize = (width * height) / numThreads;
+
+		for (int index = 0; index < width*height; index++) {
+			if (labels[index] == 0) continue;
+			labels[index] = (index / localLabelSize) * localLabelSize + labels[index];
+		}
+
+
+		for (int border = ((width*height)) - localLabelSize;  0 < border; border-=localLabelSize) {
+
+			std::unordered_map<int, int> changes;
+
+			for(int index = border; index<border+width; index++){
+
+				int upIndex = index-width;
+				int maxVal = labels[index];
+				int oldUp = -1, oldLeft=-1, oldRight=-1;
+
+				if (abs(data[index*pixelWidth] - data[upIndex*pixelWidth]) < Threshold) {
+					maxVal = std::max(maxVal, labels[upIndex]);
+					oldUp = labels[upIndex];
+					if (maxVal != oldUp) {
+						if(!(changes.find(oldUp) != changes.end() && changes[oldUp] > maxVal))
+						changes[oldUp] = maxVal;
 					}
-					imageSegmentation(labels+i*localLabelSize,data+i*localDataSize,width,height/numThreads,pixelWidth,Threshold);
-			}
-	}
-printf("here\n" );
-if(numThreads > 1) {
-	int localLabelSize = (width * height) / numThreads;
-	int localDataSize = (width * height* pixelWidth) / numThreads;
 
-
-	for (int index = 0; index < width*height; index++) {
-		if (labels[index] == 0) continue;
-		labels[index] = (index / localLabelSize) * localLabelSize + labels[index];
-	}
-
-	//vector<unordered_set<int>> upperBorderSets;
-	for (int border = ((width*height)) - localLabelSize;  0 < border; border-=localLabelSize) {
-		//unordered_set<int> set;
-		for(int index = border; index<border+width; index++){
-			int upIndex = index-width;
-			//int cond = -1;
-			bool change = false;
-			int maxVal = labels[index];
-			int oldUp = -1, oldLeft=-1, oldRight=-1;
-			//if (labels[index] == labels[upIndex])
-			if (abs(data[index*pixelWidth] - data[upIndex*pixelWidth]) < Threshold) {
-				maxVal = std::max(maxVal, labels[upIndex]);
-				oldUp = labels[upIndex];
-				change = oldUp != maxVal;
-			}
-			if (upIndex % width != 0 && abs(data[index*pixelWidth] - data[(upIndex-1)*pixelWidth]) < Threshold) {
-				oldLeft = labels[upIndex-1];
-				maxVal = std::max(maxVal, labels[upIndex-1]);
-				change = change || oldLeft != maxVal;
-			}
-			if ((upIndex + 1) % width != 0 && abs(data[index*pixelWidth] - data[(upIndex+1)*pixelWidth]) < Threshold) {
-				maxVal = std::max(maxVal, labels[upIndex+1]);
-				oldRight = labels[upIndex+1];
-				change = change || oldRight != maxVal;
-			}
-			if (!change) continue;
-
-			//int maxVal = std::max(labels[index], labels[upIndex]);
-			//int minVal = std::min(labels[index], labels[upIndex]);
-						//for (int i = minVal-1; i > border-localLabelSize; i--) {
-			#pragma omp parallel for num_threads(numThreads)
-			for (int i = border-localLabelSize+1; i < border/*+localLabelSize*/; i++) {
-				if (labels[i] == oldUp || labels[i] == oldRight || labels[i] == oldLeft) {
-					labels[i] = maxVal;
 				}
-			}
-			for (int j = border; j < index; j++) {
-				if (labels[j] == oldUp || labels[j] == oldLeft || labels[j] == oldRight) {
-					for (int k = border; k < border + localLabelSize; k++) {
-						if (labels[j] == oldUp || labels[j] == oldLeft) {
-							//printf("This happened\n");
-							labels[j] = maxVal;
-						}
+				if (upIndex % width != 0 && abs(data[index*pixelWidth] - data[(upIndex-1)*pixelWidth]) < Threshold) {
+					oldLeft = labels[upIndex-1];
+					maxVal = std::max(maxVal, labels[upIndex-1]);
+					if (oldLeft != maxVal) {
+						if(!(changes.find(oldLeft) != changes.end() && changes[oldLeft] > maxVal))
+						changes[oldLeft] = maxVal;
 					}
-					break;
+
+				}
+				if ((upIndex + 1) % width != 0 && abs(data[index*pixelWidth] - data[(upIndex+1)*pixelWidth]) < Threshold) {
+					maxVal = std::max(maxVal, labels[upIndex+1]);
+					oldRight = labels[upIndex+1];
+					if (maxVal != oldRight) {
+						if(!(changes.find(oldRight) != changes.end() && changes[oldRight] > maxVal))
+						changes[oldRight] = maxVal;
+					}
+
+				}
+
+			}
+
+			#pragma omp parallel for num_threads(numThreads)
+			for (int i = border-localLabelSize+1; i < border+localLabelSize; i++) {
+				if (changes.find(labels[i]) != changes.end()) {
+					int newVal = changes[labels[i]];
+					while (changes.find(newVal) != changes.end()) {
+
+						newVal = changes[newVal];
+					}
+					labels[i] = newVal;
 				}
 			}
 		}
+
 	}
-}
 
 	double stop_time = getTime();
 	double segTime = stop_time - start_time;
