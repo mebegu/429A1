@@ -7,11 +7,14 @@
 #include <sys/time.h>
 #include <omp.h>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #define MATCH(s) (!strcmp(argv[ac], (s)))
 
 
-
+using std::vector;
+using std::unordered_set;
 
 static const double kMicro = 1.0e-6;
 double getTime()
@@ -220,18 +223,53 @@ if(numThreads > 1) {
 		labels[index] = (index / localLabelSize) * localLabelSize + labels[index];
 	}
 
+	//vector<unordered_set<int>> upperBorderSets;
 	for (int border = ((width*height)) - localLabelSize;  0 < border; border-=localLabelSize) {
+		//unordered_set<int> set;
 		for(int index = border; index<border+width; index++){
-				if (labels[index] == labels[index-width]) continue;
-				if (abs(data[index*pixelWidth] - data[(index-width)*pixelWidth]) >= Threshold) continue;
-				int maxVal = std::max(labels[index], labels[index-width]);
-				int minVal = std::min(labels[index], labels[index-width]);
-				#pragma omp parallel for num_threads(numThreads)
-				for (int i = minVal-1; i > border-localLabelSize; i--) {
-					if (labels[i] == minVal) {
-						labels[i] = maxVal;
-					}
+			int upIndex = index-width;
+			//int cond = -1;
+			bool change = false;
+			int maxVal = labels[index];
+			int oldUp = -1, oldLeft=-1, oldRight=-1;
+			//if (labels[index] == labels[upIndex])
+			if (abs(data[index*pixelWidth] - data[upIndex*pixelWidth]) < Threshold) {
+				maxVal = std::max(maxVal, labels[upIndex]);
+				oldUp = labels[upIndex];
+				change = oldUp != maxVal;
+			}
+			if (upIndex % width != 0 && abs(data[index*pixelWidth] - data[(upIndex-1)*pixelWidth]) < Threshold) {
+				oldLeft = labels[upIndex-1];
+				maxVal = std::max(maxVal, labels[upIndex-1]);
+				change = change || oldLeft != maxVal;
+			}
+			if ((upIndex + 1) % width != 0 && abs(data[index*pixelWidth] - data[(upIndex+1)*pixelWidth]) < Threshold) {
+				maxVal = std::max(maxVal, labels[upIndex+1]);
+				oldRight = labels[upIndex+1];
+				change = change || oldRight != maxVal;
+			}
+			if (!change) continue;
+
+			//int maxVal = std::max(labels[index], labels[upIndex]);
+			//int minVal = std::min(labels[index], labels[upIndex]);
+						//for (int i = minVal-1; i > border-localLabelSize; i--) {
+			#pragma omp parallel for num_threads(numThreads)
+			for (int i = border-localLabelSize+1; i < border/*+localLabelSize*/; i++) {
+				if (labels[i] == oldUp || labels[i] == oldRight || labels[i] == oldLeft) {
+					labels[i] = maxVal;
 				}
+			}
+			for (int j = border; j < index; j++) {
+				if (labels[j] == oldUp || labels[j] == oldLeft || labels[j] == oldRight) {
+					for (int k = border; k < border + localLabelSize; k++) {
+						if (labels[j] == oldUp || labels[j] == oldLeft) {
+							//printf("This happened\n");
+							labels[j] = maxVal;
+						}
+					}
+					break;
+				}
+			}
 		}
 	}
 }
