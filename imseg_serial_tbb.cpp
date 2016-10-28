@@ -5,16 +5,17 @@
 #include "stb_image.h"
 #include <algorithm>
 #include <sys/time.h>
-#include <omp.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include "tbb/tbb.h"
 
 #define MATCH(s) (!strcmp(argv[ac], (s)))
 
 
 using std::vector;
 using std::unordered_set;
+using namespace tbb;
 
 static const double kMicro = 1.0e-6;
 double getTime()
@@ -59,7 +60,7 @@ void imageSegmentation(int *labels, unsigned char *data, int width, int height, 
 				if (idx3 < 0) {
 					printf("idx negative: %d\n", idx);
 				}
-				//printf("%d %d %d %d\n", idx3, idx, omp_get_thread_num(), pp);
+
 				if (labels[idx] == 0)
 				continue;
 
@@ -157,6 +158,7 @@ int main(int argc,char **argv)
 	const char *filename = "input.png";
 	const char *outputname = "output.png";
 
+
 	// Parse command line arguments
 	if(argc<2)
 	{
@@ -187,6 +189,8 @@ int main(int argc,char **argv)
 	int *labels = (int *)malloc(sizeof(int)*width*height);
 	unsigned char *seg_data = (unsigned char *)malloc(sizeof(unsigned char)*width*height*3);
 
+	task_scheduler_init init(numThreads);
+
 	printf("Applying segmentation...\n");
 
 	double start_time = getTime();
@@ -208,29 +212,25 @@ int main(int argc,char **argv)
 			labels[idx] = idx + 1;
 		}
 	}
-	#if defined(_OPENMP)
-	omp_set_dynamic(0);
-	#endif
 
-	int localDataSize = (width * pixelWidth * height) / numThreads;
-	int localLabelSize = (width * height) / numThreads;
 
+		int localDataSize = (width * pixelWidth * height) / numThreads;
+		int localLabelSize = (width * height) / numThreads;
 	//Now perform relabeling
 
-		for(int i=0; i<numThreads; i++)
-			printf("%d %d\n", localLabelSize, localDataSize);
-			
-		#pragma omp parallel for num_threads(numThreads)
-		for(int i=0; i<numThreads; i++){
-			for (int j = 0; j < localLabelSize; j++) {
-				int newLabel = ((int)data[(i*localLabelSize+j)*pixelWidth]) == 0 ? 0 : j+1;
 
-				labels[i*localLabelSize+j] = newLabel;
+
+		parallel_for(0,numThreads, [&](int i){
+					for (int j = 0; j < localLabelSize; j++) {
+						int newLabel = ((int)data[(i*localLabelSize+j)*pixelWidth]) == 0 ? 0 : j+1;
+						labels[i*localLabelSize+j] = newLabel;
+					}
+					imageSegmentation(labels+i*localLabelSize,data+i*localDataSize,width,height/numThreads,pixelWidth,Threshold);
 			}
-			imageSegmentation(labels+i*localLabelSize,data+i*localDataSize,width,height/numThreads,pixelWidth,Threshold);
-		}
+	);
 
 	printf("In the memory of \"here\"\n" );
+
 	if(numThreads > 1) {
 
 		int localLabelSize = (width * height) / numThreads;
@@ -281,8 +281,9 @@ int main(int argc,char **argv)
 
 			}
 
-			#pragma omp parallel for num_threads(numThreads)
-			for (int i = border-localLabelSize+1; i < border+localLabelSize; i++) {
+
+		parallel_for(border-localLabelSize+1, border+localLabelSize, [&](int i){
+
 				if (changes.find(labels[i]) != changes.end()) {
 					int newVal = changes[labels[i]];
 					while (changes.find(newVal) != changes.end()) {
@@ -292,8 +293,11 @@ int main(int argc,char **argv)
 					labels[i] = newVal;
 				}
 			}
-		}
+		);
 
+
+//dfi
+		}
 	}
 
 	double stop_time = getTime();
@@ -341,17 +345,17 @@ int main(int argc,char **argv)
 		}
 	}
 
+
 	//LOOP NEST 4
-	#pragma omp parallel for num_threads(numThreads) collapse(2)
-	for (int i = 0; i < height; i++) {
-		for (int j = 0; j < width; j++) {
+	parallel_for(0, height, [&](int i){
+		parallel_for(0, width, [&](int j){
 
 			int label = labels[i*width+j];
 			seg_data[(i*width+j)*3+0] = (char)red[label];
 			seg_data[(i*width+j)*3+1] = (char)blue[label];
 			seg_data[(i*width+j)*3+2] = (char)green[label];
-		}
-	}
+		});
+	});
 
 	for ( auto it = count.begin(); it != count.end(); ++it )
 	{
@@ -380,4 +384,5 @@ int main(int argc,char **argv)
 
 	printf("Done...\n");
 	return 0;
+
 }
