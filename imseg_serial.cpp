@@ -282,6 +282,7 @@ if(numThreads > 1) {
 	}
 
 	//LOOP NEST 4
+	#pragma omp parallel for num_threads(numThreads) collapse(2)
 	for (int i = 0; i < height; i++) {
 		for (int j = 0; j < width; j++) {
 
