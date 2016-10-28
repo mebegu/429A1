@@ -261,8 +261,8 @@ int main(int argc,char **argv)
 					if (maxVal != oldRight) {
 						if(!(changes.find(oldRight) != changes.end() && changes[oldRight] > maxVal))
 								changes[oldRight] = maxVal;
-						
-					}
+						}
+
 					//change = change || oldRight != maxVal;
 				}
 				//if (!change) continue;
@@ -289,11 +289,6 @@ break;
 }*/
 }
 
-for(auto loc : changes)
-{
-    if(loc.first >= loc.second)
-			printf("hello\n");
-}
 
 printf("%d\n", changes.size());
 #pragma omp parallel for num_threads(numThreads)
