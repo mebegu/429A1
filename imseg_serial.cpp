@@ -194,8 +194,8 @@ int main(int argc,char **argv)
 	{
 		//numThreads = omp_get_num_threads();
 
-	//	printf("%d\n", numThreads);
-	//pixelWidth=1;
+		//	printf("%d\n", numThreads);
+		//pixelWidth=1;
 		int localDataSize = (width * pixelWidth * height) / numThreads;
 		//unsigned char *localData = new unsigned char[localDataSize];
 
@@ -203,159 +203,198 @@ int main(int argc,char **argv)
 		//int *localLabels = new int[localLabelSize];
 		printf("%d %d\n", localLabelSize, localDataSize);
 		#pragma omp for
-			for(int i=0; i<numThreads; i++){
-					for (int j = 0; j < localLabelSize; j++) {
-						int newLabel = ((int)data[(i*localLabelSize+j)*pixelWidth]) == 0 ? 0 : j+1;
-						//if (labels[i*localLabelSize+j] != newLabel) printf("This happened i:%d j:%d\n",i,j );
-						labels[i*localLabelSize+j] = newLabel;
+		for(int i=0; i<numThreads; i++){
+			for (int j = 0; j < localLabelSize; j++) {
+				int newLabel = ((int)data[(i*localLabelSize+j)*pixelWidth]) == 0 ? 0 : j+1;
+				//if (labels[i*localLabelSize+j] != newLabel) printf("This happened i:%d j:%d\n",i,j );
+				labels[i*localLabelSize+j] = newLabel;
+			}
+			imageSegmentation(labels+i*localLabelSize,data+i*localDataSize,width,height/numThreads,pixelWidth,Threshold);
+		}
+	}
+	printf("here\n" );
+	if(numThreads > 1) {
+		int localLabelSize = (width * height) / numThreads;
+		int localDataSize = (width * height* pixelWidth) / numThreads;
+
+
+		for (int index = 0; index < width*height; index++) {
+			if (labels[index] == 0) continue;
+			labels[index] = (index / localLabelSize) * localLabelSize + labels[index];
+		}
+
+		//vector<unordered_set<int>> upperBorderSets;
+		for (int border = ((width*height)) - localLabelSize;  0 < border; border-=localLabelSize) {
+			//unordered_set<int> set;
+			std::unordered_map<int, int> changes;
+
+			for(int index = border; index<border+width; index++){
+				int upIndex = index-width;
+				//int cond = -1;
+				bool change = false;
+				int maxVal = labels[index];
+				int oldUp = -1, oldLeft=-1, oldRight=-1;
+				//std::unordered_map<int, int> changes;
+				//if (labels[index] == labels[upIndex])
+				if (abs(data[index*pixelWidth] - data[upIndex*pixelWidth]) < Threshold) {
+					maxVal = std::max(maxVal, labels[upIndex]);
+					oldUp = labels[upIndex];
+					if (maxVal != oldUp) {
+						if(!(changes.find(oldUp) != changes.end() && changes[oldUp] > maxVal))
+								changes[oldUp] = maxVal;
 					}
-					imageSegmentation(labels+i*localLabelSize,data+i*localDataSize,width,height/numThreads,pixelWidth,Threshold);
-			}
-	}
-printf("here\n" );
-if(numThreads > 1) {
-	int localLabelSize = (width * height) / numThreads;
-	int localDataSize = (width * height* pixelWidth) / numThreads;
-
-
-	for (int index = 0; index < width*height; index++) {
-		if (labels[index] == 0) continue;
-		labels[index] = (index / localLabelSize) * localLabelSize + labels[index];
-	}
-
-	//vector<unordered_set<int>> upperBorderSets;
-	for (int border = ((width*height)) - localLabelSize;  0 < border; border-=localLabelSize) {
-		//unordered_set<int> set;
-		for(int index = border; index<border+width; index++){
-			int upIndex = index-width;
-			//int cond = -1;
-			bool change = false;
-			int maxVal = labels[index];
-			int oldUp = -1, oldLeft=-1, oldRight=-1;
-			//if (labels[index] == labels[upIndex])
-			if (abs(data[index*pixelWidth] - data[upIndex*pixelWidth]) < Threshold) {
-				maxVal = std::max(maxVal, labels[upIndex]);
-				oldUp = labels[upIndex];
-				change = oldUp != maxVal;
-			}
-			if (upIndex % width != 0 && abs(data[index*pixelWidth] - data[(upIndex-1)*pixelWidth]) < Threshold) {
-				oldLeft = labels[upIndex-1];
-				maxVal = std::max(maxVal, labels[upIndex-1]);
-				change = change || oldLeft != maxVal;
-			}
-			if ((upIndex + 1) % width != 0 && abs(data[index*pixelWidth] - data[(upIndex+1)*pixelWidth]) < Threshold) {
-				maxVal = std::max(maxVal, labels[upIndex+1]);
-				oldRight = labels[upIndex+1];
-				change = change || oldRight != maxVal;
-			}
-			if (!change) continue;
-
-			//int maxVal = std::max(labels[index], labels[upIndex]);
-			//int minVal = std::min(labels[index], labels[upIndex]);
-						//for (int i = minVal-1; i > border-localLabelSize; i--) {
-			#pragma omp parallel for num_threads(numThreads)
-			for (int i = border-localLabelSize+1; i < border/*+localLabelSize*/; i++) {
-				if (labels[i] == oldUp || labels[i] == oldRight || labels[i] == oldLeft) {
-					labels[i] = maxVal;
+					//changes[oldUp] = maxVal;
+					//change = oldUp != maxVal;
 				}
-			}
-			for (int j = border; j < index; j++) {
-				if (labels[j] == oldUp || labels[j] == oldLeft || labels[j] == oldRight) {
-					for (int k = border; k < border + localLabelSize; k++) {
-						if (labels[j] == oldUp || labels[j] == oldLeft) {
-							//printf("This happened\n");
-							labels[j] = maxVal;
+				if (upIndex % width != 0 && abs(data[index*pixelWidth] - data[(upIndex-1)*pixelWidth]) < Threshold) {
+					oldLeft = labels[upIndex-1];
+					maxVal = std::max(maxVal, labels[upIndex-1]);
+					if (oldLeft != maxVal) {
+						if(!(changes.find(oldLeft) != changes.end() && changes[oldLeft] > maxVal))
+								changes[oldLeft] = maxVal;
 						}
-					}
-					break;
+					//change = change || oldLeft != maxVal;
 				}
+				if ((upIndex + 1) % width != 0 && abs(data[index*pixelWidth] - data[(upIndex+1)*pixelWidth]) < Threshold) {
+					maxVal = std::max(maxVal, labels[upIndex+1]);
+					oldRight = labels[upIndex+1];
+					if (maxVal != oldRight) {
+						if(!(changes.find(oldRight) != changes.end() && changes[oldRight] > maxVal))
+								changes[oldRight] = maxVal;
+						
+					}
+					//change = change || oldRight != maxVal;
+				}
+				//if (!change) continue;
+
+				//int maxVal = std::max(labels[index], labels[upIndex]);
+				//int minVal = std::min(labels[index], labels[upIndex]);
+				//for (int i = minVal-1; i > border-localLabelSize; i--) {
+				//#pragma omp parallel for num_threads(numThreads)
+				//for (int i = border-localLabelSize+1; i < border/*+localLabelSize*/; i++) {
+				/*	if (labels[i] == oldUp || labels[i] == oldRight || labels[i] == oldLeft) {
+				labels[i] = maxVal;
 			}
+		}
+		for (int j = border; j < index; j++) {
+		if (labels[j] == oldUp || labels[j] == oldLeft || labels[j] == oldRight) {
+		for (int k = border; k < border + localLabelSize; k++) {
+		if (labels[j] == oldUp || labels[j] == oldLeft) {
+		//printf("This happened\n");
+		labels[j] = maxVal;
+	}
+}
+break;
+}
+}*/
+}
+
+for(auto loc : changes)
+{
+    if(loc.first >= loc.second)
+			printf("hello\n");
+}
+
+printf("%d\n", changes.size());
+#pragma omp parallel for num_threads(numThreads)
+for (int i = border-localLabelSize+1; i < border+localLabelSize; i++) {
+	if (changes.find(labels[i]) != changes.end()) {
+		int newVal = changes[labels[i]];
+		while (changes.find(newVal) != changes.end()) {
+			//printf("%d %d\n", newVal, changes[newVal] );
+			//if (changes[newVal] == newVal) break;
+			newVal = changes[newVal];
+		}
+		//printf("there\n");
+		labels[i] = newVal;
+	}
+}
+}
+
+}
+
+double stop_time = getTime();
+double segTime = stop_time - start_time;
+
+std::unordered_map<int, int> red;
+std::unordered_map<int, int> green;
+std::unordered_map<int, int> blue;
+std::unordered_map<int, int> count;
+
+srand(seed);
+start_time = getTime();
+int clusters = 0;
+int min_cluster = height*width;
+int max_cluster = -1;
+double avg_cluster = 0.0;
+
+//LOOP NEST 3
+//Now we will assign colors to labels
+for (int i = 0; i < height; i++) {
+	for (int j = 0; j < width; j++) {
+		int label = labels[i*width+j];
+
+		if(label == 0) //background
+		{
+			red[0] = 0;
+			green[0] = 0;
+			blue[0] = 0;
+
+		}
+		else {
+			//if this is a new label, we need to assign a color
+			if(red.find(label) == red.end())
+			{
+				clusters++;
+				count[label] = 1;
+
+				red[label] = (int)random()*255;
+				green[label] = (int)random()*255;
+				blue[label] = (int)random()*255;
+			}
+			else
+			count[label]++;
 		}
 	}
 }
 
-	double stop_time = getTime();
-	double segTime = stop_time - start_time;
+//LOOP NEST 4
+#pragma omp parallel for num_threads(numThreads) collapse(2)
+for (int i = 0; i < height; i++) {
+	for (int j = 0; j < width; j++) {
 
-	std::unordered_map<int, int> red;
-	std::unordered_map<int, int> green;
-	std::unordered_map<int, int> blue;
-	std::unordered_map<int, int> count;
-
-	srand(seed);
-	start_time = getTime();
-	int clusters = 0;
-	int min_cluster = height*width;
-	int max_cluster = -1;
-	double avg_cluster = 0.0;
-
-	//LOOP NEST 3
-	//Now we will assign colors to labels
-	for (int i = 0; i < height; i++) {
-		for (int j = 0; j < width; j++) {
-			int label = labels[i*width+j];
-
-			if(label == 0) //background
-			{
-				red[0] = 0;
-				green[0] = 0;
-				blue[0] = 0;
-
-			}
-			else {
-				//if this is a new label, we need to assign a color
-				if(red.find(label) == red.end())
-				{
-					clusters++;
-					count[label] = 1;
-
-					red[label] = (int)random()*255;
-					green[label] = (int)random()*255;
-					blue[label] = (int)random()*255;
-				}
-				else
-				count[label]++;
-			}
-		}
+		int label = labels[i*width+j];
+		seg_data[(i*width+j)*3+0] = (char)red[label];
+		seg_data[(i*width+j)*3+1] = (char)blue[label];
+		seg_data[(i*width+j)*3+2] = (char)green[label];
 	}
+}
 
-	//LOOP NEST 4
-	#pragma omp parallel for num_threads(numThreads) collapse(2)
-	for (int i = 0; i < height; i++) {
-		for (int j = 0; j < width; j++) {
+for ( auto it = count.begin(); it != count.end(); ++it )
+{
+	min_cluster = std::min( min_cluster, it->second);
+	max_cluster = std::max( max_cluster, it->second);
+	avg_cluster += it->second;
+}
 
-			int label = labels[i*width+j];
-			seg_data[(i*width+j)*3+0] = (char)red[label];
-			seg_data[(i*width+j)*3+1] = (char)blue[label];
-			seg_data[(i*width+j)*3+2] = (char)green[label];
-		}
-	}
+stop_time = getTime();
+double colorTime = stop_time - start_time;
 
-	for ( auto it = count.begin(); it != count.end(); ++it )
-	{
-		min_cluster = std::min( min_cluster, it->second);
-		max_cluster = std::max( max_cluster, it->second);
-		avg_cluster += it->second;
-	}
+printf("Segmentation Time (sec): %f\n", segTime);
+printf("Coloring Time     (sec): %f\n", colorTime);
+printf("Total Time        (sec): %f\n", colorTime + segTime);
+printf("-----------Statisctics---------------\n");
+printf("Number of Clusters   : %d\n", clusters);
+printf("Min Cluster Size     : %d\n", min_cluster);
+printf("Max Cluster Size     : %d\n", max_cluster);
+printf("Average Cluster Size : %f\n", avg_cluster/clusters);
 
-	stop_time = getTime();
-	double colorTime = stop_time - start_time;
+printf("Writing Segmented Image...\n");
+stbi_write_png(outputname, width, height, 3, seg_data, 0);
+stbi_image_free(data);
+free(seg_data);
+free(labels);
 
-	printf("Segmentation Time (sec): %f\n", segTime);
-	printf("Coloring Time     (sec): %f\n", colorTime);
-	printf("Total Time        (sec): %f\n", colorTime + segTime);
-	printf("-----------Statisctics---------------\n");
-	printf("Number of Clusters   : %d\n", clusters);
-	printf("Min Cluster Size     : %d\n", min_cluster);
-	printf("Max Cluster Size     : %d\n", max_cluster);
-	printf("Average Cluster Size : %f\n", avg_cluster/clusters);
-
-	printf("Writing Segmented Image...\n");
-	stbi_write_png(outputname, width, height, 3, seg_data, 0);
-	stbi_image_free(data);
-	free(seg_data);
-	free(labels);
-
-	printf("Done...\n");
-	return 0;
+printf("Done...\n");
+return 0;
 }
