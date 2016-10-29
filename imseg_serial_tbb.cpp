@@ -214,75 +214,118 @@ int main(int argc,char **argv)
 	}
 
 
-		int localDataSize = (width * pixelWidth * height) / numThreads;
-		int localLabelSize = (width * height) / numThreads;
+	int localDataSize = (width * pixelWidth) * (height / numThreads);
+	int localLabelSize = width * (height / numThreads);
+	int remainingSize = width * (height % numThreads);
 	//Now perform relabeling
 
 
 
-		parallel_for(0,numThreads, [&](int i){
-					for (int j = 0; j < localLabelSize; j++) {
-						int newLabel = ((int)data[(i*localLabelSize+j)*pixelWidth]) == 0 ? 0 : j+1;
-						labels[i*localLabelSize+j] = newLabel;
-					}
-					imageSegmentation(labels+i*localLabelSize,data+i*localDataSize,width,height/numThreads,pixelWidth,Threshold);
+		parallel_for(0,numThreads + (remainingSize==0?0:1), [&](int i){
+			if (i < numThreads) { //Equal partition
+				for (int j = 0; j < localLabelSize; j++) {
+					int newLabel = ((int)data[(i*localLabelSize+j)*pixelWidth]) == 0 ? 0 : j+1;
+					labels[i*localLabelSize+j] = newLabel;
+				}
+				imageSegmentation(labels+i*localLabelSize,data+i*localDataSize,width, height/numThreads, pixelWidth, Threshold);
+			} else { //Remaining part for indivisible images
+				for (int j = 0; j < remainingSize; j++) {
+					int newLabel = ((int)data[(i*localLabelSize+j)*pixelWidth]) == 0 ? 0 : j+1;
+					labels[i*localLabelSize+j] = newLabel;
+				}
+				imageSegmentation(labels+i*localLabelSize,data+i*localDataSize,width, height%numThreads, pixelWidth, Threshold);
+
 			}
+		}
 	);
 
 	printf("In the memory of \"here\"\n" );
 
 	if(numThreads > 1) {
 
-		int localLabelSize = (width * height) / numThreads;
-
-		for (int index = 0; index < width*height; index++) {
-			if (labels[index] == 0) continue;
-			labels[index] = (index / localLabelSize) * localLabelSize + labels[index];
-		}
 
 
-		for (int border = ((width*height)) - localLabelSize;  0 < border; border-=localLabelSize) {
 
-			std::unordered_map<int, int> changes;
-
-			for(int index = border; index<border+width; index++){
-
-				int upIndex = index-width;
-				int maxVal = labels[index];
-				int oldUp = -1, oldLeft=-1, oldRight=-1;
-
-				if (abs(data[index*pixelWidth] - data[upIndex*pixelWidth]) < Threshold) {
-					maxVal = std::max(maxVal, labels[upIndex]);
-					oldUp = labels[upIndex];
-					if (maxVal != oldUp) {
-						if(!(changes.find(oldUp) != changes.end() && changes[oldUp] > maxVal))
-						changes[oldUp] = maxVal;
-					}
-
-				}
-				if (upIndex % width != 0 && abs(data[index*pixelWidth] - data[(upIndex-1)*pixelWidth]) < Threshold) {
-					oldLeft = labels[upIndex-1];
-					maxVal = std::max(maxVal, labels[upIndex-1]);
-					if (oldLeft != maxVal) {
-						if(!(changes.find(oldLeft) != changes.end() && changes[oldLeft] > maxVal))
-						changes[oldLeft] = maxVal;
-					}
-
-				}
-				if ((upIndex + 1) % width != 0 && abs(data[index*pixelWidth] - data[(upIndex+1)*pixelWidth]) < Threshold) {
-					maxVal = std::max(maxVal, labels[upIndex+1]);
-					oldRight = labels[upIndex+1];
-					if (maxVal != oldRight) {
-						if(!(changes.find(oldRight) != changes.end() && changes[oldRight] > maxVal))
-						changes[oldRight] = maxVal;
-					}
-
+				for (int index = 0; index < width*height; index++) {
+					if (labels[index] == 0) continue;
+					labels[index] = (index / localLabelSize) * localLabelSize + labels[index];
 				}
 
-			}
+				int decrement = (remainingSize == 0 ? localLabelSize : remainingSize);
+
+				for (int border = ((width*height)) - decrement;  0 < border; border-=localLabelSize) {
+					//iter++;
+					std::unordered_map<int, int> changes;
+					for(int index = border; index<border+width; index++){
+
+						int upIndex = index-width;
+						int maxVal = labels[index];
+						int oldUp = -1, oldLeft=-1, oldRight=-1;
+
+						if (abs(data[index*pixelWidth] - data[upIndex*pixelWidth]) < Threshold) {
+							maxVal = std::max(maxVal, labels[upIndex]);
+							oldUp = labels[upIndex];
+							if (maxVal != oldUp) {
+								if (changes.find(oldUp) == changes.end()) {
+									changes[oldUp] = maxVal;
+								} else {
+
+									int lastUp = oldUp;
+									while (changes.find(lastUp) != changes.end()) {
+										lastUp = changes[lastUp];
+									}
+									int lastDown = maxVal;
+									while (changes.find(lastDown) != changes.end()) {
+										lastDown = changes[lastDown];
+									}
+									if (lastUp != lastDown)
+										changes[std::min(lastUp, lastDown)] = std::max(lastUp, lastDown);
+
+								}
+							}
+
+						}
+						if (upIndex % width != 0 && abs(data[index*pixelWidth] - data[(upIndex-1)*pixelWidth]) < Threshold) {
+							oldLeft = labels[upIndex-1];
+							maxVal = std::max(maxVal, labels[upIndex-1]);
+							if (oldLeft != maxVal) {
+								int lastUp = oldLeft;
+								while (changes.find(lastUp) != changes.end()) {
+									lastUp = changes[lastUp];
+								}
+								int lastDown = maxVal;
+								while (changes.find(lastDown) != changes.end()) {
+									lastDown = changes[lastDown];
+								}
+								if (lastUp != lastDown)
+									changes[std::min(lastUp, lastDown)] = std::max(lastUp, lastDown);
+							}
+
+						}
+						if ((upIndex + 1) % width != 0 && abs(data[index*pixelWidth] - data[(upIndex+1)*pixelWidth]) < Threshold) {
+							maxVal = std::max(maxVal, labels[upIndex+1]);
+							oldRight = labels[upIndex+1];
+							if (maxVal != oldRight) {
+								if(!(changes.find(oldRight) != changes.end() && changes[oldRight] > maxVal)) {
+									int lastUp = oldRight;
+									while (changes.find(lastUp) != changes.end()) {
+										lastUp = changes[lastUp];
+									}
+									int lastDown = maxVal;
+									while (changes.find(lastDown) != changes.end()) {
+										lastDown = changes[lastDown];
+									}
+									if (lastUp != lastDown)
+										changes[std::min(lastUp, lastDown)] = std::max(lastUp, lastDown);
+								}
+							}
+
+						}
+
+					}
 
 
-		parallel_for(border-localLabelSize+1, border+localLabelSize, [&](int i){
+		parallel_for(border-localLabelSize, border+decrement, [&](int i){
 
 				if (changes.find(labels[i]) != changes.end()) {
 					int newVal = changes[labels[i]];
@@ -294,7 +337,7 @@ int main(int argc,char **argv)
 				}
 			}
 		);
-
+		decrement = localLabelSize;
 
 //dfi
 		}

@@ -212,39 +212,46 @@ int main(int argc,char **argv)
 	omp_set_dynamic(0);
 	#endif
 
-	int localDataSize = (width * pixelWidth * height) / numThreads;
-	int localLabelSize = (width * height) / numThreads;
-
+	int localDataSize = (width * pixelWidth) * (height / numThreads);
+	int localLabelSize = width * (height / numThreads);
+	int remainingSize = width * (height % numThreads);
 	//Now perform relabeling
 
 		for(int i=0; i<numThreads; i++)
 			printf("%d %d\n", localLabelSize, localDataSize);
-			
-		#pragma omp parallel for num_threads(numThreads)
-		for(int i=0; i<numThreads; i++){
-			for (int j = 0; j < localLabelSize; j++) {
-				int newLabel = ((int)data[(i*localLabelSize+j)*pixelWidth]) == 0 ? 0 : j+1;
 
-				labels[i*localLabelSize+j] = newLabel;
+		#pragma omp parallel for num_threads(numThreads)
+		for(int i=0; i<numThreads + (remainingSize==0?0:1); i++){
+			if (i < numThreads) { //Equal partition
+				for (int j = 0; j < localLabelSize; j++) {
+					int newLabel = ((int)data[(i*localLabelSize+j)*pixelWidth]) == 0 ? 0 : j+1;
+					labels[i*localLabelSize+j] = newLabel;
+				}
+				imageSegmentation(labels+i*localLabelSize,data+i*localDataSize,width, height/numThreads, pixelWidth, Threshold);
+			} else { //Remaining part for indivisible images
+				for (int j = 0; j < remainingSize; j++) {
+					int newLabel = ((int)data[(i*localLabelSize+j)*pixelWidth]) == 0 ? 0 : j+1;
+					labels[i*localLabelSize+j] = newLabel;
+				}
+				imageSegmentation(labels+i*localLabelSize,data+i*localDataSize,width, height%numThreads, pixelWidth, Threshold);
+
 			}
-			imageSegmentation(labels+i*localLabelSize,data+i*localDataSize,width,height/numThreads,pixelWidth,Threshold);
 		}
 
 	printf("In the memory of \"here\"\n" );
 	if(numThreads > 1) {
 
-		int localLabelSize = (width * height) / numThreads;
 
 		for (int index = 0; index < width*height; index++) {
 			if (labels[index] == 0) continue;
 			labels[index] = (index / localLabelSize) * localLabelSize + labels[index];
 		}
 
+		int decrement = (remainingSize == 0 ? localLabelSize : remainingSize);
 
-		for (int border = ((width*height)) - localLabelSize;  0 < border; border-=localLabelSize) {
-
+		for (int border = ((width*height)) - decrement;  0 < border; border-=localLabelSize) {
+			//iter++;
 			std::unordered_map<int, int> changes;
-
 			for(int index = border; index<border+width; index++){
 
 				int upIndex = index-width;
@@ -255,8 +262,22 @@ int main(int argc,char **argv)
 					maxVal = std::max(maxVal, labels[upIndex]);
 					oldUp = labels[upIndex];
 					if (maxVal != oldUp) {
-						if(!(changes.find(oldUp) != changes.end() && changes[oldUp] > maxVal))
-						changes[oldUp] = maxVal;
+						if (changes.find(oldUp) == changes.end()) {
+							changes[oldUp] = maxVal;
+						} else {
+
+							int lastUp = oldUp;
+							while (changes.find(lastUp) != changes.end()) {
+								lastUp = changes[lastUp];
+							}
+							int lastDown = maxVal;
+							while (changes.find(lastDown) != changes.end()) {
+								lastDown = changes[lastDown];
+							}
+							if (lastUp != lastDown)
+								changes[std::min(lastUp, lastDown)] = std::max(lastUp, lastDown);
+
+						}
 					}
 
 				}
@@ -264,8 +285,16 @@ int main(int argc,char **argv)
 					oldLeft = labels[upIndex-1];
 					maxVal = std::max(maxVal, labels[upIndex-1]);
 					if (oldLeft != maxVal) {
-						if(!(changes.find(oldLeft) != changes.end() && changes[oldLeft] > maxVal))
-						changes[oldLeft] = maxVal;
+						int lastUp = oldLeft;
+						while (changes.find(lastUp) != changes.end()) {
+							lastUp = changes[lastUp];
+						}
+						int lastDown = maxVal;
+						while (changes.find(lastDown) != changes.end()) {
+							lastDown = changes[lastDown];
+						}
+						if (lastUp != lastDown)
+							changes[std::min(lastUp, lastDown)] = std::max(lastUp, lastDown);
 					}
 
 				}
@@ -273,8 +302,18 @@ int main(int argc,char **argv)
 					maxVal = std::max(maxVal, labels[upIndex+1]);
 					oldRight = labels[upIndex+1];
 					if (maxVal != oldRight) {
-						if(!(changes.find(oldRight) != changes.end() && changes[oldRight] > maxVal))
-						changes[oldRight] = maxVal;
+						if(!(changes.find(oldRight) != changes.end() && changes[oldRight] > maxVal)) {
+							int lastUp = oldRight;
+							while (changes.find(lastUp) != changes.end()) {
+								lastUp = changes[lastUp];
+							}
+							int lastDown = maxVal;
+							while (changes.find(lastDown) != changes.end()) {
+								lastDown = changes[lastDown];
+							}
+							if (lastUp != lastDown)
+								changes[std::min(lastUp, lastDown)] = std::max(lastUp, lastDown);
+						}
 					}
 
 				}
@@ -282,7 +321,7 @@ int main(int argc,char **argv)
 			}
 
 			#pragma omp parallel for num_threads(numThreads)
-			for (int i = border-localLabelSize+1; i < border+localLabelSize; i++) {
+			for (int i = border-localLabelSize; i < border+decrement; i++) {
 				if (changes.find(labels[i]) != changes.end()) {
 					int newVal = changes[labels[i]];
 					while (changes.find(newVal) != changes.end()) {
@@ -292,10 +331,12 @@ int main(int argc,char **argv)
 					labels[i] = newVal;
 				}
 			}
+			decrement = localLabelSize;
 		}
 
-	}
 
+
+	}
 	double stop_time = getTime();
 	double segTime = stop_time - start_time;
 
